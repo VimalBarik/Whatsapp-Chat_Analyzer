@@ -26,6 +26,11 @@ try:
 except LookupError:
     nltk.download('stopwords')
 
+try:
+    nltk.data.find('sentiments/vader_lexicon.zip')
+except LookupError:
+    nltk.download('vader_lexicon', quiet=True)
+
 def count_emojis(text: str) -> int:
     """Count the number of emojis in text"""
     if not isinstance(text, str):
