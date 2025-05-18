@@ -135,7 +135,6 @@ Install with:
 - No chat data is collected or stored
 - Example visuals use synthetic data
 
-```
 
 Key improvements:
 1. **Dual usage paths** - Clear instructions for both web app and module usage
