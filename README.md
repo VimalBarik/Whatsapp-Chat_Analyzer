@@ -77,7 +77,7 @@ Key Notes:
 - The core functionality is packaged in `whatsapp_analyzer/`
 - `app.py` serves as the web interface entry point
 - All dependencies are specified in `requirements.txt`
-```
+
 
 ---
 
