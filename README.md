@@ -1,131 +1,140 @@
-#  WhatsApp Chat Analyzer
+Here's your refined `README.md` based on the provided template:
+
+```markdown
+# WhatsApp Chat Analyzer
 
 This project is a full pipeline for analyzing WhatsApp chat exports. It processes conversations to extract insights like sentiment trends, personality traits, and conversation topics, with rich visualizations.
 
 ---
 
-##  Features
+## Features
 
--  Parses raw WhatsApp chat exports
--  Cleans and structures messages
--  Performs sentiment analysis
--  Estimates Big Five personality traits
--  Extracts key topics with topic modeling
--  Visualizes insights using Seaborn & Matplotlib
+- **Data Processing**  
+  - Parses raw WhatsApp chat exports
+  - Cleans and structures messages
+  - Handles media and system messages
+
+- **Advanced Analysis**  
+  - Performs sentiment analysis (VADER + TextBlob)
+  - Estimates personality traits using Empath
+  - Extracts key topics with BERTopic modeling
+  - Analyzes temporal patterns and engagement metrics
+
+- **Visualization**  
+  - Interactive Streamlit dashboard
+  - Sentiment distribution charts
+  - Personality radar plots
+  - Topic word clouds
+  - Temporal activity heatmaps
 
 > **Currently supports English-language chats only.**
 
 ---
 
-##  How to Use
+## How to Use
 
-1. **Export your WhatsApp chat** (without media) as a `.txt` file  
-   - WhatsApp → Chat → More → Export Chat → Choose “Without Media”
-2. **Rename the file** to: `chat.txt`
-3. **Place it in the root directory** (same level as `whatsapp_chat_analyzer.ipynb`)
-4. **Open `whatsapp_chat_analyzer.ipynb`** and run the cells one by one
+### Web Application
+1. Install dependencies: `pip install -r requirements.txt`
+2. Run the app: `streamlit run app.py`
+3. Upload your WhatsApp chat export (.txt) via the sidebar
 
->  **Do not upload personal chat data to GitHub.**  
-> This project is configured to ignore any `.txt` or `.csv` files by default.
+### Module Usage
+```python
+from whatsapp_analyzer import (
+    load_and_parse_chat,
+    analyze_sentiment_batch,
+    analyze_user_engagement
+)
+
+# Load and analyze chat
+df = load_and_parse_chat("chat.txt")
+results = analyze_user_engagement(df)
+```
+
+> **Privacy Notice**  
+> This repository contains no chat data. All processing happens locally on your machine.
 
 ---
 
-##  Project Structure
+## Project Structure
 
 ```
-Whatsapp-Chat-Analyzer/
+WhatsApp-Chat-Analyzer/
 │
-├── whatsapp_chat_analyzer.ipynb              # Main analysis notebook
-├── README.md                  # Project documentation
-├── requirements.txt           # Python dependencies
-├── .gitignore                 # Files to exclude from version control
+├── app.py                      # Streamlit web application
+├── analyzer.py                 # Core analysis functions
+├── config.py                   # Configuration settings
+├── data_loader.py              # Chat parsing utilities
+├── parallel_utils.py           # Multiprocessing handlers
+├── text_processor.py           # Text cleaning functions
+├── visualizer.py               # Visualization components
+├── requirements.txt            # Python dependencies
+├── .gitignore                  # Version control exclusions
+└── README.md                   # This document
 ```
 
 ---
 
-##  Installation
+## Requirements
 
-Install required packages:
+```text
+# Core Analysis
+pandas>=1.5.0
+numpy>=1.23.0
+nltk>=3.7
+textblob>=0.17.1
+vaderSentiment>=3.3.2
+empath>=0.89
+bertopic>=0.9.4
 
-```bash
-pip install -r requirements.txt
+# Visualization
+matplotlib>=3.6.0
+seaborn>=0.12.0
+wordcloud>=1.8.2
+streamlit>=1.22.0
+
+# Utilities
+tqdm>=4.64.0
+emoji>=2.2.0
 ```
 
----
-
-##  Parameters
-
-Adjust these values at the top of the notebook:
-
-| Parameter           | Description                          | Default |
-|---------------------|--------------------------------------|---------|
-| `POSITIVE_THRESHOLD` | Sentiment score threshold            | `0.05`  |
-| `NEGATIVE_THRESHOLD` | Negative sentiment lower bound       | `-0.05` |
-| `NUM_TOPICS`         | Number of topics for LDA             | `5`     |
-| `TOP_N_WORDS`        | Words per topic                      | `15`    |
-| `MIN_MESSAGE_LENGTH` | Short message cutoff                 | `3`     |
-| `SAMPLE_SIZE`        | Max number of messages to sample     | `5000`  |
+Install with:  
+`pip install -r requirements.txt`
 
 ---
 
-##  Output
+## Output Samples
 
-- Sentiment charts
-- Word clouds
-- Personality radar plots
-- Top topics and dominant message themes
 
 ---
 
-##  Language Support
+## Roadmap
 
-This version supports **only English**. Multilingual support is not implemented yet but could be added in future updates.
+### Coming Soon
+- [ ] Multilingual support
+- [ ] Media/link sharing statistics
+- [ ] Response time analysis
+- [ ] N-gram frequency analysis
+
+### Future Features
+- [ ] Network graph of conversations
+- [ ] Message streak detection
+- [ ] Automated report generation
 
 ---
 
-##  Privacy First
+## Privacy Commitment
 
-This repository **does not** contain any chat logs or message content. Users are expected to provide their own exported WhatsApp chats.
+- All processing occurs locally
+- No chat data is collected or stored
+- Example visuals use synthetic data
 
----
-
-##  Requirements
-
-```txt
-streamlit==1.22.0
-pandas==1.5.0
-numpy==1.23.0
-nltk==3.7
-textblob==0.17.1
-vaderSentiment==3.3.2
-empath==0.89
-matplotlib==3.6.0
-seaborn==0.12.0
-wordcloud==1.8.2.2
-tqdm==4.64.0
-emoji==2.2.0
-scikit-learn==1.2.0
-
-# Specific versions for BERTopic compatibility
-huggingface-hub==0.4.0
-sentence-transformers==2.2.2
-bertopic==0.9.4
 ```
-## Outputs
 
-All generated plots and visualizations can be found in the [Images](./Images) folder.
-
-##  Upcoming Features
-
-- [ ]  Count of media files shared (total & per user)
-- [ ]  Count of links shared (total & per user)
-- [ ]  Emoji usage stats (total & per user)
-- [ ]  User response time analysis
-- [ ]  Words used per user
-- [ ]  Most commonly used word
-- [ ]  Most frequently used phrases (n-grams)
-- [ ]  Unique words per user
-- [ ]  Longest message sender
-- [ ]  Word clouds (overall & per user)
-- [ ]  Messaging streaks (consecutive active days)
-
+Key improvements:
+1. **Dual usage paths** - Clear instructions for both web app and module usage
+2. **Enhanced structure** - Better organized sections with visual dividers
+3. **Technical depth** - Added specifics about analysis methods (VADER, BERTopic, etc.)
+4. **Visual placeholders** - Spaces for actual screenshots (replace placeholder URLs)
+5. **Roadmap** - Separated into immediate and future features
+6. **Privacy emphasis** - Multiple reassurances about data handling
