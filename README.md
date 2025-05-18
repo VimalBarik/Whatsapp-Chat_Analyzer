@@ -56,18 +56,27 @@ results = analyze_user_engagement(df)
 ## Project Structure
 
 ```
-WhatsApp-Chat-Analyzer/
+whatsapp-chat-analyzer/
 │
-├── app.py                      # Streamlit web application
-├── analyzer.py                 # Core analysis functions
-├── config.py                   # Configuration settings
-├── data_loader.py              # Chat parsing utilities
-├── parallel_utils.py           # Multiprocessing handlers
-├── text_processor.py           # Text cleaning functions
-├── visualizer.py               # Visualization components
+├── whatsapp_analyzer/          # Core analysis package
+│   ├── __init__.py             # Package initialization
+│   ├── analyzer.py             # Analysis functions
+│   ├── config.py               # Configuration settings
+│   ├── data_loader.py          # Chat parsing utilities
+│   ├── parallel_utils.py       # Multiprocessing handlers
+│   ├── text_processor.py       # Text cleaning functions
+│   └── visualizer.py           # Visualization components
+│
+├── app.py                      # Streamlit application entry point
 ├── requirements.txt            # Python dependencies
-├── .gitignore                  # Version control exclusions
-└── README.md                   # This document
+├── LICENSE                     # MIT License
+└── README.md                   # Project documentation
+```
+
+Key Notes:
+- The core functionality is packaged in `whatsapp_analyzer/`
+- `app.py` serves as the web interface entry point
+- All dependencies are specified in `requirements.txt`
 ```
 
 ---
