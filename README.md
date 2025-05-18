@@ -1,7 +1,4 @@
-Here's your refined `README.md` based on the provided template:
-
-```markdown
-# WhatsApp Chat Analyzer
+## WhatsApp Chat Analyzer
 
 This project is a full pipeline for analyzing WhatsApp chat exports. It processes conversations to extract insights like sentiment trends, personality traits, and conversation topics, with rich visualizations.
 
