@@ -4,7 +4,6 @@ import os                          # FIX 1: was missing — os.getenv("HF_TOKEN"
 import re
 import time
 import logging
-import requests
 import numpy as np
 import pandas as pd
 import emoji
@@ -17,11 +16,9 @@ from datetime import datetime
 
 # ── HF Inference API setup ────────────────────────────────────────────────────
 
-HF_API_URL = (
-    "https://api-inference.huggingface.co/models/"
-    "cardiffnlp/twitter-xlm-roberta-base-sentiment"
-)
 HF_TOKEN_ENV_VAR = "HF_TOKEN"
+HF_SENTIMENT_MODEL_ENV_VAR = "HF_SENTIMENT_MODEL"
+DEFAULT_HF_SENTIMENT_MODEL = "cardiffnlp/twitter-roberta-base-sentiment-latest"
 
 # FIX 2: removed stray `print("Using HF API")` that was sitting between
 #         two function definitions and executed on every import.
@@ -53,12 +50,15 @@ def _translate_to_english(text: str) -> str:
         return text
 
 
-def configure_hf_token(token: Optional[str]) -> None:
+def configure_hf_token(token: Optional[str], model: Optional[str] = None) -> None:
     """Set or clear the Hugging Face token used by the sentiment backend."""
     if token and str(token).strip():
         os.environ[HF_TOKEN_ENV_VAR] = str(token).strip()
     else:
         os.environ.pop(HF_TOKEN_ENV_VAR, None)
+
+    if model and str(model).strip():
+        os.environ[HF_SENTIMENT_MODEL_ENV_VAR] = str(model).strip()
 
 
 def get_hf_token() -> Optional[str]:
@@ -68,6 +68,10 @@ def get_hf_token() -> Optional[str]:
 
 def has_hf_token() -> bool:
     return get_hf_token() is not None
+
+
+def get_hf_sentiment_model() -> str:
+    return os.getenv(HF_SENTIMENT_MODEL_ENV_VAR, DEFAULT_HF_SENTIMENT_MODEL).strip()
 
 
 # ── HF API helpers ────────────────────────────────────────────────────────────
@@ -86,7 +90,7 @@ def _emoji_sentiment(text: str) -> Optional[str]:
 
 def _hf_request(inputs: Union[str, List[str]], max_retries: int = 5) -> list:
     """
-    POST text to the HF Inference API and return the raw scores list.
+    Send text to the Hugging Face Inference Providers API and return raw scores.
 
     FIX 3: added exponential backoff with jitter instead of flat 2 s sleep.
     FIX 4: raise on non-200 HTTP status so transient errors are properly retried.
@@ -99,31 +103,35 @@ def _hf_request(inputs: Union[str, List[str]], max_retries: int = 5) -> list:
             "HF_TOKEN not set; skipping Hugging Face API sentiment backend"
         )
 
+    from huggingface_hub import InferenceClient
+
+    client = InferenceClient(provider="hf-inference", api_key=hf_token)
+    model = get_hf_sentiment_model()
+    items = inputs if isinstance(inputs, list) else [inputs]
+
     for attempt in range(max_retries):
-        response = requests.post(
-            HF_API_URL,
-            headers={"Authorization": f"Bearer {hf_token}"},
-            json={"inputs": inputs},
-            timeout=30,
-        )
+        try:
+            result = [
+                client.text_classification(
+                    text,
+                    model=model,
+                    top_k=3,
+                )
+                for text in items
+            ]
+            return result if isinstance(inputs, list) else result[0]
+        except Exception as e:
+            if attempt == max_retries - 1:
+                raise RuntimeError(
+                    f"HF Inference Providers request failed for model {model!r}: {e}"
+                ) from e
 
-        # FIX 4: surface HTTP errors (503 model-loading, 429 rate-limit, etc.)
-        if response.status_code not in (200, 503):
-            response.raise_for_status()
-
-        result = response.json()
-
-        # FIX 6: model is still warming up — respect the estimated_time hint
-        if isinstance(result, dict) and "error" in result:
-            wait = result.get("estimated_time", 2 ** attempt)   # exponential fallback
+            wait = 2 ** attempt
             logger.warning(
-                "HF API: %s  (attempt %d/%d — waiting %.1f s)",
-                result["error"], attempt + 1, max_retries, wait,
+                "HF API request failed: %s (attempt %d/%d - waiting %.1f s)",
+                e, attempt + 1, max_retries, wait,
             )
-            time.sleep(wait + 0.5)   # small jitter
-            continue
-
-        return result
+            time.sleep(wait + 0.5)
 
     raise RuntimeError(
         "HF Inference API failed after multiple retries"
@@ -139,15 +147,23 @@ def _parse_hf_output(result) -> Tuple[str, float]:
       - Flat:    [ {"label": ..., "score": ...}, ...]    (some model variants)
     Returns (label, score) normalised to "positive" / "neutral" / "negative".
     """
+    if isinstance(result, tuple):
+        result = list(result)
     if not isinstance(result, list) or not result:
         raise ValueError(f"Unexpected HF response shape: {result!r}")
 
     # Unwrap one level of nesting if needed.
     scores = result[0] if isinstance(result[0], list) else result
 
-    best = max(scores, key=lambda x: x["score"])
-    label = best["label"].lower()
-    score = best["score"]
+    def _label(item):
+        return item.get("label") if isinstance(item, dict) else getattr(item, "label")
+
+    def _score(item):
+        return item.get("score") if isinstance(item, dict) else getattr(item, "score")
+
+    best = max(scores, key=_score)
+    label = _label(best).lower()
+    score = _score(best)
 
     label_map = {
         "label_0": "negative",
@@ -231,7 +247,7 @@ def analyze_sentiment(
     1. Cache lookup          (instant — avoids re-processing duplicates)
     2. Emoji shortcut        (instant — no network call)
     3. Skip very short text
-    4. HF Inference API      (GPU-backed, cardiffnlp/twitter-xlm-roberta-base-sentiment)
+    4. HF Inference API      (GPU-backed sentiment model)
     5. VADER + TextBlob      (fallback when the API is unavailable)
     """
     resolved_backend = _resolve_sentiment_backend(backend, use_multilingual)
@@ -318,9 +334,7 @@ def analyze_sentiment_batch(
     ):
         batch_texts = unique_texts[start:start + batch_size]
         raw = _hf_request([text[:512] for text in batch_texts])
-        if len(batch_texts) == 1:
-            raw_items = [raw]
-        elif isinstance(raw, list) and len(raw) == len(batch_texts):
+        if isinstance(raw, list) and len(raw) == len(batch_texts):
             raw_items = raw
         else:
             raise ValueError(f"Unexpected HF batch response shape: {raw!r}")
