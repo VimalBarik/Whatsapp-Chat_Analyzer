@@ -6,7 +6,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import logging
-import datetime
 import os
 import sys
 from typing import Optional, Dict, List
@@ -16,7 +15,6 @@ project_dir = os.path.dirname(os.path.abspath(__file__))
 if project_dir not in sys.path:
     sys.path.append(project_dir)
 
-# Import modules - adjust imports based on your project structure
 from whatsapp_analyzer.data_loader import load_and_parse_chat
 from whatsapp_analyzer.text_processor import preprocess_dataframe, get_user_statistics
 from whatsapp_analyzer.analyzer import (
@@ -27,7 +25,7 @@ from whatsapp_analyzer.analyzer import (
     analyze_response_times,
     temporal_analysis,
     analyze_engagement,
-    analyze_user_engagement
+    analyze_user_engagement,
 )
 from whatsapp_analyzer.visualizer import (
     plot_sentiment,
@@ -35,14 +33,13 @@ from whatsapp_analyzer.visualizer import (
     plot_participants,
     plot_personality,
     plot_topics_bertopic,
-    plot_user_engagement
+    plot_user_engagement,
 )
 
-# Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Set page config
+# ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="WhatsApp Chat Analyzer",
     page_icon="💬",
@@ -50,337 +47,418 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# App title and description
-st.title("WhatsApp Chat Analyzer")
-st.write("Upload your exported WhatsApp chat to analyze conversation patterns and insights.")
+st.title("WhatsApp Chat Analyzer 💬")
+st.write("Upload your exported WhatsApp chat to analyse conversation patterns and insights.")
 
-# Sidebar
+# ── Sidebar ───────────────────────────────────────────────────────────────────
 st.sidebar.header("Upload Chat")
-uploaded_file = st.sidebar.file_uploader("Choose a WhatsApp chat export file (.txt)", type=["txt"])
+uploaded_file = st.sidebar.file_uploader(
+    "Choose a WhatsApp chat export file (.txt)", type=["txt"]
+)
 
-# Analysis options
+st.sidebar.header("Language")
+chat_language = st.sidebar.selectbox(
+    "Chat language",
+    options=["Auto-detect", "English", "Italian", "Other"],
+    index=0,
+    help=(
+        "Choose 'Auto-detect' to let the app figure it out. "
+        "Selecting the correct language improves sentiment accuracy."
+    ),
+)
+USE_MULTILINGUAL = chat_language != "English"
+
 st.sidebar.header("Analysis Options")
-run_sentiment = st.sidebar.checkbox("Sentiment Analysis", value=True)
+run_sentiment   = st.sidebar.checkbox("Sentiment Analysis",   value=True)
 run_personality = st.sidebar.checkbox("Personality Analysis", value=True)
-run_topics = st.sidebar.checkbox("Topic Modeling", value=False, help="May be slow for large chats")
-run_emoji = st.sidebar.checkbox("Emoji Analysis", value=True)
+run_topics      = st.sidebar.checkbox(
+    "Topic Modeling", value=True,
+    help="May be slow for large chats."
+)
+run_emoji       = st.sidebar.checkbox("Emoji Analysis",       value=True)
+run_engagement  = st.sidebar.checkbox("Engagement Analysis",  value=True)
 
-# Helper functions
+# ── Cached helpers ────────────────────────────────────────────────────────────
+
 @st.cache_data
 def load_data(uploaded_file):
-    """Load data from uploaded file with caching"""
-    if uploaded_file is not None:
-        try:
-            # Load and parse chat data
-            df = load_and_parse_chat(uploaded_file)
-            if df is None or df.empty:
-                st.error("Error: Could not parse chat data from the uploaded file")
-                logger.error("Failed to parse chat data - returned None or empty DataFrame")
-                return None
-                
-            return df
-        except Exception as e:
-            st.error(f"Error: {str(e)}")
-            logger.exception("Exception while loading data")
+    if uploaded_file is None:
+        return None
+    try:
+        df = load_and_parse_chat(uploaded_file)
+        if df is None or df.empty:
+            st.error("Could not parse chat data from the uploaded file. "
+                     "Make sure it is an unmodified WhatsApp export (.txt).")
             return None
-    return None
+        return df
+    except Exception as e:
+        st.error(f"Error loading file: {e}")
+        logger.exception("Exception while loading data")
+        return None
+
 
 @st.cache_data
 def process_data(df):
-    """Process data with caching"""
     if df is None:
-        logger.error("Cannot process None DataFrame in process_data")
         return None
-        
     try:
-        # Preprocess the dataframe
-        processed_df = preprocess_dataframe(df)
-        if processed_df is None:
-            st.error("Error: Failed to preprocess data")
-            logger.error("preprocess_dataframe returned None")
-            return None
-            
-        return processed_df
+        processed = preprocess_dataframe(df)
+        if processed is None:
+            st.error("Failed to preprocess data.")
+        return processed
     except Exception as e:
-        st.error(f"Error during processing: {str(e)}")
+        st.error(f"Error during preprocessing: {e}")
         logger.exception("Exception in process_data")
         return None
 
+
 @st.cache_data
-def run_analysis(df, run_sentiment=True, run_personality=True):
-    """Run analysis with caching"""
+def run_analysis(df, do_sentiment, do_personality, do_topics, multilingual):
     if df is None:
-        logger.error("Cannot analyze None DataFrame in run_analysis")
         return {}
-        
+
     results = {}
-    
-    try:
-        # Extract text for analysis
-        texts = df['Text'].fillna('').astype(str).tolist()
-        
-        # Run sentiment analysis
-        if run_sentiment and texts:
-            with st.spinner("Running sentiment analysis..."):
-                sentiment_results = analyze_sentiment_batch(texts)
-                
-                # Add results to dataframe
+    texts = df['Text'].fillna('').astype(str).tolist()
+
+    if do_sentiment and texts:
+        with st.spinner("Running sentiment analysis…"):
+            try:
+                sentiment_results = analyze_sentiment_batch(
+                    texts, use_multilingual=multilingual
+                )
                 for col in sentiment_results.columns:
                     df[col] = sentiment_results[col].values
-                    
                 results['sentiment'] = sentiment_results
-                
-        # Run personality analysis
-        if run_personality and texts:
-            with st.spinner("Running personality analysis..."):
-                traits = ['joy', 'anger', 'sadness', 'family', 'friend', 'social', 
-                        'positive_emotion', 'negative_emotion']
+            except Exception as e:
+                logger.exception("Sentiment analysis failed")
+                st.warning(f"Sentiment analysis failed: {e}")
+
+    if do_personality and texts:
+        with st.spinner("Running personality analysis…"):
+            try:
+                traits = [
+                    'joy', 'anger', 'sadness', 'family',
+                    'friend', 'social', 'positive_emotion', 'negative_emotion',
+                ]
                 personality_results = analyze_personality_texts(texts, traits)
-                
-                # Add results to dataframe
                 for col in personality_results.columns:
                     df[col] = personality_results[col].values
-                    
                 results['personality'] = personality_results
-                
-        return results
+            except Exception as e:
+                logger.exception("Personality analysis failed")
+                st.warning(f"Personality analysis failed: {e}")
+
+    if do_topics and texts:
+        with st.spinner("Running topic modeling (this may take a while)…"):
+            try:
+                content_df = df[df['Text'].str.len() > 10].copy()
+                if not content_df.empty:
+                    topic_model, topics, topic_info = perform_topic_modeling(
+                        content_df['Text'].tolist()
+                    )
+                    if topic_model is not None and topics is not None:
+                        content_df['topic'] = topics
+                        results['topics'] = {
+                            'model': topic_model,
+                            'topics': topics,
+                            'info': topic_info,
+                            'df': content_df,
+                        }
+                        logger.info(f"Generated {len(set(topics))} topics")
+                    else:
+                        st.warning("Topic modeling returned no results.")
+                else:
+                    st.warning("Not enough text content for topic modeling.")
+            except Exception as e:
+                logger.exception("Topic modeling failed")
+                st.warning(f"Topic modeling failed: {e}")
+
+    return results
+
+
+# ── Topic display helper ──────────────────────────────────────────────────────
+
+def display_topic_modeling_results(results):
+    if 'topics' not in results:
+        st.warning("No topic modeling results available.")
+        return
+
+    topic_model = results['topics']['model']
+    topics      = results['topics']['topics']
+    topic_info  = results['topics']['info']
+    topic_df    = results['topics']['df']
+
+    st.subheader("Topic Overview")
+    try:
+        st.dataframe(topic_info.drop('Representative_Docs', axis=1, errors='ignore'))
+
+        st.subheader("Topic Visualizations")
+        topic_figures = plot_topics_bertopic(topic_model, topics, topic_df)
+
+        if not topic_figures:
+            st.warning("Could not generate topic visualizations.")
+            return
+
+        st.pyplot(topic_figures[0])
+        if len(topic_figures) > 1:
+            st.pyplot(topic_figures[1])
+
+        st.subheader("Top Topics – Word Clouds")
+        num_wc   = min(len(topic_figures) - 2, 6)
+        num_cols = min(2, num_wc) if num_wc > 0 else 1
+        cols     = st.columns(num_cols)
+        for i, fig in enumerate(topic_figures[2: 2 + num_wc]):
+            cols[i % num_cols].pyplot(fig)
+
+        st.subheader("Explore a Specific Topic")
+        topic_unique = sorted(set(topics))
+        if topic_unique:
+            selected = st.selectbox(
+                "Select topic",
+                options=topic_unique,
+                format_func=lambda x: (
+                    f"Topic {x}: "
+                    + (topic_info[topic_info['Topic'] == x]['Name'].values[0]
+                       if x in topic_info['Topic'].values else 'Unknown')
+                ),
+            )
+            docs = topic_df[topic_df['topic'] == selected]['Text'].head(10)
+            st.write("**Representative messages:**")
+            for i, doc in enumerate(docs, 1):
+                st.write(f"{i}. {doc}")
     except Exception as e:
-        st.error(f"Error during analysis: {str(e)}")
-        logger.exception("Exception in run_analysis")
-        return {}
+        st.error(f"Error displaying topic results: {e}")
+        logger.exception("Exception in display_topic_modeling_results")
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    # Load the chat data
     df = load_data(uploaded_file)
-    
-    # If data is loaded successfully
-    if df is not None:
-        st.success(f"Successfully loaded chat with {len(df)} messages")
-        
-        # Show data info
-        with st.expander("Data Preview"):
-            st.dataframe(df.head(5))
-            
-            # Show basic info
-            st.write(f"**Date Range**: {df['Datetime'].min().date()} to {df['Datetime'].max().date()}")
-            st.write(f"**Participants**: {', '.join(df['Name'].unique())}")
-            st.write(f"**Total Messages**: {len(df)}")
-        
-        # Process the data
-        processed_df = process_data(df)
-        
-        if processed_df is not None:
-            # Run analysis if data is processed successfully
-            analysis_results = run_analysis(
-                processed_df, 
-                run_sentiment=run_sentiment,
-                run_personality=run_personality
-            )
-            
-            # Start visualization
-            st.header("Chat Analysis")
-            
-            # Create tabs for different analyses
-            tab1, tab2, tab3, tab4 = st.tabs([
-                "Participant Analysis", 
-                "Temporal Analysis", 
-                "Sentiment Analysis", 
-                "Content Analysis"
-            ])
-            
-            with tab1:
-                st.subheader("Participant Activity")
-                
-                # Plot message counts
-                fig = plot_participants(processed_df)
-                if fig:
-                    st.pyplot(fig)
-                
-                # Calculate user statistics
-                user_stats = get_user_statistics(processed_df)
-                
-                # Show participant stats
-                if user_stats:
-                    st.subheader("Participant Statistics")
-                    for name, stats in user_stats.items():
-                        st.write(f"**{name}**")
-                        col1, col2, col3 = st.columns(3)
-                        col1.metric("Messages", stats['message_count'])
-                        col2.metric("Words", stats['word_count'])
-                        col3.metric("Avg Words/Message", f"{stats['avg_words_per_message']:.1f}")
-                        
-                        # Show media count if available
-                        if 'media_count' in stats:
-                            st.metric("Media Messages", stats['media_count'])
-                        
-                        # Show emoji stats if available
-                        if run_emoji and 'favorite_emojis' in stats and stats['favorite_emojis']:
-                            st.write("**Top Emojis:**", ''.join(stats['favorite_emojis'].keys()))
-            
-            with tab2:
-                st.subheader("Temporal Patterns")
-                
-                # Add temporal columns if needed
-                if 'hour' not in processed_df.columns and 'Hour' in processed_df.columns:
-                    processed_df['hour'] = processed_df['Hour']
-                    
-                if 'day_of_week' not in processed_df.columns and 'DayOfWeek' in processed_df.columns:
-                    processed_df['day_of_week'] = processed_df['DayOfWeek']
-                
-                # Plot temporal patterns
-                fig = plot_temporal(processed_df)
-                if fig:
-                    st.pyplot(fig)
-                else:
-                    # Create custom temporal plots if visualizer couldn't create them
-                    st.write("Creating custom temporal plots...")
-                    
-                    # Messages by hour
-                    if 'Hour' in processed_df.columns:
-                        fig, ax = plt.subplots(figsize=(10, 5))
-                        sns.countplot(x='Hour', data=processed_df, ax=ax)
-                        ax.set_title("Messages by Hour of Day")
-                        ax.set_xlabel("Hour")
-                        ax.set_ylabel("Message Count")
-                        st.pyplot(fig)
-                    
-                    # Messages by day of week
-                    if 'DayOfWeek' in processed_df.columns:
-                        days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-                        fig, ax = plt.subplots(figsize=(10, 5))
-                        sns.countplot(
-                            x='DayOfWeek', 
-                            data=processed_df, 
-                            order=days_order,
-                            ax=ax
-                        )
-                        ax.set_title("Messages by Day of Week")
-                        ax.set_xlabel("Day")
-                        ax.set_ylabel("Message Count")
-                        plt.xticks(rotation=45)
-                        st.pyplot(fig)
-            
-            with tab3:
-                st.subheader("Sentiment Analysis")
-                
-                if run_sentiment and 'sentiment' in processed_df.columns:
-                    # Plot sentiment distribution
-                    fig = plot_sentiment(processed_df)
-                    if fig:
-                        st.pyplot(fig)
-                    
-                    # Show sentiment stats
-                    st.write("**Sentiment Distribution:**")
-                    sentiment_counts = processed_df['sentiment'].value_counts()
-                    
-                    # Create metrics in columns
-                    cols = st.columns(3)
-                    for i, (sent, count) in enumerate(sentiment_counts.items()):
-                        pct = 100 * count / len(processed_df)
-                        cols[i].metric(
-                            sent.capitalize(), 
-                            f"{count} ({pct:.1f}%)"
-                        )
-                    
-                    # Sentiment by participant
-                    st.subheader("Sentiment by Participant")
-                    
-                    # Create a pivot table of sentiment by participant
-                    pivot = pd.crosstab(
-                        processed_df['Name'], 
-                        processed_df['sentiment'],
-                        normalize='index'
-                    ) * 100
-                    
-                    # Plot the pivot table
-                    fig, ax = plt.subplots(figsize=(10, 5))
-                    pivot.plot(
-                        kind='bar', 
-                        stacked=True, 
-                        ax=ax,
-                        color=['#4caf50', '#ffeb3b', '#f44336']  # green, yellow, red
-                    )
-                    ax.set_title("Sentiment Distribution by Participant (%)")
-                    ax.set_ylabel("Percentage")
-                    ax.set_xlabel("Participant")
-                    ax.legend(title="Sentiment")
-                    plt.xticks(rotation=45)
-                    st.pyplot(fig)
-                else:
-                    st.info("Sentiment analysis not selected or failed to run.")
-            
-            with tab4:
-                st.subheader("Content Analysis")
-                
-                # Word count analysis
-                if 'WordCount' in processed_df.columns:
-                    st.write("**Word Count Distribution**")
-                    
-                    fig, ax = plt.subplots(figsize=(10, 5))
-                    sns.histplot(
-                        data=processed_df, 
-                        x='WordCount',
-                        bins=20,
-                        kde=True,
-                        ax=ax
-                    )
-                    ax.set_title("Word Count Distribution")
-                    ax.set_xlabel("Words per Message")
-                    ax.set_ylabel("Frequency")
-                    st.pyplot(fig)
-                
-                # Personality traits
-                if run_personality and 'personality' in analysis_results:
-                    st.subheader("Personality Traits")
-                    
-                    # Plot personality traits
-                    fig = plot_personality(analysis_results['personality'])
-                    if fig:
-                        st.pyplot(fig)
-                    
-                    # Show trait comparison by participant
-                    st.write("**Trait Comparison by Participant**")
-                    
-                    personality_df = analysis_results['personality']
-                    traits = personality_df.columns.tolist()
-                    
-                    # Add participant column
-                    personality_df['Name'] = processed_df['Name'].values
-                    
-                    # Calculate average trait values by participant
-                    trait_by_participant = personality_df.groupby('Name')[traits].mean()
-                    
-                    # Plot traits by participant
-                    fig, ax = plt.subplots(figsize=(12, 6))
-                    trait_by_participant.T.plot(kind='bar', ax=ax)
-                    ax.set_title("Personality Traits by Participant")
-                    ax.set_ylabel("Score")
-                    ax.set_xlabel("Trait")
-                    plt.xticks(rotation=45)
-                    ax.legend(title="Participant")
-                    st.pyplot(fig)
-        else:
-            st.error("Failed to process the data. Please check the log for details.")
-    else:
-        # Show instructions when no file is uploaded
-        st.info("Please upload a WhatsApp chat export file (.txt) to begin analysis.")
-        
-        st.markdown("""
-        ### How to export your WhatsApp chat:
-        
-        1. Open the WhatsApp chat you want to analyze
-        2. Tap the three dots (⋮) in the top right corner
-        3. Select "More" > "Export chat"
-        4. Choose "Without media"
-        5. Save the .txt file and upload it here
-        
-        ### What you can analyze:
-        
-        - **Participant Activity**: Who sends the most messages and when
-        - **Temporal Patterns**: When the chat is most active
-        - **Sentiment Analysis**: The emotional tone of messages
-        - **Content Analysis**: Word usage, emoji patterns, and topics
-        """)
 
-if __name__ == "__main__":
-    main()
+    if df is None:
+        st.info("Please upload a WhatsApp chat export file (.txt) to begin analysis.")
+        st.markdown("""
+        ### How to export your WhatsApp chat
+
+        **English / iOS**
+        1. Open the chat → tap the contact/group name at the top
+        2. Scroll down → **Export Chat** → **Without Media**
+        3. Upload the `.txt` file here
+
+        **Italian / Android**
+        1. Apri la chat → tocca ⋮ in alto a destra
+        2. **Altro** → **Esporta chat** → **Senza media**
+        3. Carica il file `.txt` qui
+
+        ### What you can analyse
+        - **Participant Activity** – who messages most and when
+        - **Temporal Patterns** – hourly / daily activity heatmaps
+        - **Sentiment Analysis** – emotional tone (works in Italian too!)
+        - **Content Analysis** – word usage and personality traits
+        - **Topic Modeling** – main themes discussed
+        - **Engagement Analysis** – media, emoji, and word stats
+        """)
+        return
+
+    st.success(f"✅ Loaded **{len(df):,}** messages from **{df['Name'].nunique()}** participants")
+
+    with st.expander("📋 Data Preview"):
+        st.dataframe(df.head(10))
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Date Range",
+                    f"{df['Datetime'].min().date()} → {df['Datetime'].max().date()}")
+        col2.metric("Total Messages", f"{len(df):,}")
+        col3.metric("Participants", ", ".join(df['Name'].unique()))
+
+    processed_df = process_data(df)
+    if processed_df is None:
+        st.error("Failed to process the data. Please check the log.")
+        return
+
+    analysis_results = run_analysis(
+        processed_df,
+        do_sentiment=run_sentiment,
+        do_personality=run_personality,
+        do_topics=run_topics,
+        multilingual=USE_MULTILINGUAL,
+    )
+
+    st.header("📊 Chat Analysis")
+
+    tabs = st.tabs([
+        "👥 Participants",
+        "🕐 Temporal",
+        "💬 Sentiment",
+        "📝 Content",
+        "🔍 Topics",
+        "📈 Engagement",
+    ])
+
+    # ── Tab 1: Participants ───────────────────────────────────────────────────
+    with tabs[0]:
+        st.subheader("Participant Activity")
+        fig = plot_participants(processed_df)
+        if fig:
+            st.pyplot(fig)
+
+        user_stats = get_user_statistics(processed_df)
+        if user_stats:
+            st.subheader("Per-participant Statistics")
+            for name, stats in user_stats.items():
+                st.markdown(f"**{name}**")
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Messages",         stats['message_count'])
+                c2.metric("Total Words",       stats.get('word_count', 0))
+                c3.metric("Avg Words/Message", f"{stats.get('avg_words_per_message', 0):.1f}")
+                if run_emoji and stats.get('favorite_emojis'):
+                    st.write("Top emojis:", ''.join(stats['favorite_emojis'].keys()))
+
+    # ── Tab 2: Temporal ───────────────────────────────────────────────────────
+    with tabs[1]:
+        st.subheader("Temporal Patterns")
+
+        # Ensure lowercase column aliases expected by plot_temporal
+        if 'hour' not in processed_df.columns and 'Hour' in processed_df.columns:
+            processed_df['hour'] = processed_df['Hour']
+        if 'day_of_week' not in processed_df.columns and 'DayOfWeek' in processed_df.columns:
+            processed_df['day_of_week'] = processed_df['DayOfWeek']
+
+        fig = plot_temporal(processed_df)
+        if fig:
+            st.pyplot(fig)
+        else:
+            st.info("Generating fallback temporal plots…")
+            if 'Hour' in processed_df.columns:
+                fig, ax = plt.subplots(figsize=(10, 4))
+                sns.countplot(x='Hour', data=processed_df, ax=ax)
+                ax.set_title("Messages by Hour of Day")
+                st.pyplot(fig)
+            if 'DayOfWeek' in processed_df.columns:
+                days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+                fig, ax = plt.subplots(figsize=(10, 4))
+                sns.countplot(x='DayOfWeek', data=processed_df, order=days, ax=ax)
+                ax.set_title("Messages by Day of Week")
+                plt.xticks(rotation=45)
+                st.pyplot(fig)
+
+    # ── Tab 3: Sentiment ──────────────────────────────────────────────────────
+    with tabs[2]:
+        st.subheader("Sentiment Analysis")
+        if run_sentiment and 'sentiment' in processed_df.columns:
+            fig = plot_sentiment(processed_df)
+            if fig:
+                st.pyplot(fig)
+
+            st.write("**Sentiment Distribution**")
+            sentiment_counts = processed_df['sentiment'].value_counts()
+            cols = st.columns(len(sentiment_counts))
+            for i, (sent, count) in enumerate(sentiment_counts.items()):
+                pct = 100 * count / len(processed_df)
+                cols[i].metric(sent.capitalize(), f"{count} ({pct:.1f}%)")
+
+            st.subheader("Sentiment by Participant")
+            pivot = (
+                pd.crosstab(processed_df['Name'], processed_df['sentiment'], normalize='index')
+                * 100
+            )
+            fig, ax = plt.subplots(figsize=(10, 5))
+            pivot.plot(kind='bar', stacked=True, ax=ax,
+                       color=['#4caf50', '#ffeb3b', '#f44336'])
+            ax.set_title("Sentiment Distribution by Participant (%)")
+            ax.set_ylabel("Percentage")
+            ax.set_xlabel("Participant")
+            ax.legend(title="Sentiment")
+            plt.xticks(rotation=45)
+            st.pyplot(fig)
+
+            if chat_language != "English":
+                st.info(
+                    "ℹ️ Sentiment was analysed using the multilingual pipeline. "
+                    "For best results ensure `transformers` is installed "
+                    "(`pip install transformers torch`)."
+                )
+        else:
+            st.info("Enable **Sentiment Analysis** in the sidebar to see results.")
+
+    # ── Tab 4: Content ────────────────────────────────────────────────────────
+    with tabs[3]:
+        st.subheader("Content Analysis")
+
+        if 'WordCount' in processed_df.columns:
+            st.write("**Word Count Distribution**")
+            fig, ax = plt.subplots(figsize=(10, 4))
+            sns.histplot(data=processed_df, x='WordCount', bins=20, kde=True, ax=ax)
+            ax.set_title("Words per Message")
+            ax.set_xlabel("Word Count")
+            st.pyplot(fig)
+
+        if run_personality and 'personality' in analysis_results:
+            st.subheader("Personality Traits")
+            fig = plot_personality(analysis_results['personality'])
+            if fig:
+                st.pyplot(fig)
+
+            st.write("**Traits by Participant**")
+            p_df = analysis_results['personality'].copy()
+            traits_cols = p_df.columns.tolist()
+            p_df['Name'] = processed_df['Name'].values
+            by_participant = p_df.groupby('Name')[traits_cols].mean()
+
+            fig, ax = plt.subplots(figsize=(12, 5))
+            by_participant.T.plot(kind='bar', ax=ax)
+            ax.set_title("Personality Traits by Participant")
+            ax.set_ylabel("Score")
+            ax.set_xlabel("Trait")
+            plt.xticks(rotation=45)
+            ax.legend(title="Participant")
+            st.pyplot(fig)
+
+    # ── Tab 5: Topics ─────────────────────────────────────────────────────────
+    with tabs[4]:
+        st.subheader("Topic Modeling")
+        if run_topics:
+            if 'topics' in analysis_results:
+                display_topic_modeling_results(analysis_results)
+            else:
+                st.info(
+                    "Topic modeling was enabled but no results were generated. "
+                    "This can happen if there are too few messages or an error occurred."
+                )
+        else:
+            st.info("Enable **Topic Modeling** in the sidebar to see results.")
+
+    # ── Tab 6: Engagement ─────────────────────────────────────────────────────
+    with tabs[5]:
+        st.subheader("Engagement Analysis")
+        if run_engagement:
+            with st.spinner("Calculating engagement metrics…"):
+                try:
+                    engagement = analyze_user_engagement(processed_df)
+                    if engagement:
+                        # Use plot_user_engagement which now returns figures
+                        engagement_figs = plot_user_engagement(engagement)
+                        for fig in engagement_figs:
+                            st.pyplot(fig)
+
+                        # Also show raw data tables
+                        if 'media_analysis' in engagement and 'data' in engagement['media_analysis']:
+                            with st.expander("Media data"):
+                                st.dataframe(engagement['media_analysis']['data'])
+                        if 'emoji_analysis' in engagement:
+                            with st.expander("Emoji data"):
+                                st.dataframe(engagement['emoji_analysis'])
+                        if 'word_analysis' in engagement:
+                            with st.expander("Word data"):
+                                st.dataframe(engagement['word_analysis'])
+                    else:
+                        st.info("No engagement data available.")
+                except Exception as e:
+                    st.error(f"Engagement analysis failed: {e}")
+                    logger.exception("Engagement analysis error")
+        else:
+            st.info("Enable **Engagement Analysis** in the sidebar to see results.")
+
+
+# Streamlit runs at module scope — call main() directly (not under __name__ guard)
+main()
