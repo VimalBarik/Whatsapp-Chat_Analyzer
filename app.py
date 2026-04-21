@@ -9,6 +9,11 @@ import logging
 import os
 import sys
 from typing import Optional, Dict, List
+import nltk
+nltk.download('punkt', quiet=True)
+nltk.download('stopwords', quiet=True)
+nltk.download('vader_lexicon', quiet=True)
+nltk.download('punkt_tab', quiet=True)
 
 # Add project directory to path
 project_dir = os.path.dirname(os.path.abspath(__file__))
@@ -21,6 +26,8 @@ from whatsapp_analyzer.analyzer import (
     analyze_sentiment,
     analyze_sentiment_batch,
     analyze_personality_texts,
+    configure_hf_token,
+    has_hf_token,
     perform_topic_modeling,
     analyze_response_times,
     temporal_analysis,
@@ -39,6 +46,18 @@ from whatsapp_analyzer.visualizer import (
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+
+def configure_hf_token_from_secrets():
+    """Expose Streamlit's HF token secret to the analyzer module."""
+    try:
+        hf_token = st.secrets.get("HF_TOKEN")
+    except Exception:
+        hf_token = None
+
+    if hf_token:
+        configure_hf_token(hf_token)
+
+
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="WhatsApp Chat Analyzer",
@@ -46,6 +65,8 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+configure_hf_token_from_secrets()
 
 st.title("WhatsApp Chat Analyzer 💬")
 st.write("Upload your exported WhatsApp chat to analyse conversation patterns and insights.")
@@ -77,6 +98,20 @@ run_topics      = st.sidebar.checkbox(
 )
 run_emoji       = st.sidebar.checkbox("Emoji Analysis",       value=True)
 run_engagement  = st.sidebar.checkbox("Engagement Analysis",  value=True)
+
+hf_token_available = has_hf_token()
+sentiment_backend = st.sidebar.selectbox(
+    "Sentiment backend",
+    options=["Hugging Face API", "Local fallback"],
+    index=0 if hf_token_available else 1,
+    help="Hugging Face uses your Streamlit HF_TOKEN secret. Local fallback uses VADER/TextBlob.",
+)
+sentiment_backend_key = "hf" if sentiment_backend == "Hugging Face API" else "local"
+if sentiment_backend_key == "hf":
+    if hf_token_available:
+        st.sidebar.success("HF_TOKEN loaded from Streamlit secrets.")
+    else:
+        st.sidebar.error("HF_TOKEN was not found in Streamlit secrets.")
 
 # ── Cached helpers ────────────────────────────────────────────────────────────
 
@@ -113,7 +148,10 @@ def process_data(df):
 
 
 @st.cache_data
-def run_analysis(df, do_sentiment, do_personality, do_topics, multilingual):
+def run_analysis(
+    df, do_sentiment, do_personality, do_topics, multilingual,
+    sentiment_backend, hf_token_available
+):
     if df is None:
         return {}
 
@@ -124,14 +162,23 @@ def run_analysis(df, do_sentiment, do_personality, do_topics, multilingual):
         with st.spinner("Running sentiment analysis…"):
             try:
                 sentiment_results = analyze_sentiment_batch(
-                    texts, use_multilingual=multilingual
+                    texts,
+                    use_multilingual=multilingual,
+                    backend=sentiment_backend,
                 )
                 for col in sentiment_results.columns:
                     df[col] = sentiment_results[col].values
                 results['sentiment'] = sentiment_results
             except Exception as e:
                 logger.exception("Sentiment analysis failed")
-                st.warning(f"Sentiment analysis failed: {e}")
+                if sentiment_backend == "hf":
+                    st.error(
+                        "Hugging Face sentiment analysis failed. "
+                        "Check that `HF_TOKEN` is present in Streamlit secrets and has access "
+                        f"to the inference API. Details: {e}"
+                    )
+                else:
+                    st.warning(f"Sentiment analysis failed: {e}")
 
     if do_personality and texts:
         with st.spinner("Running personality analysis…"):
@@ -282,6 +329,8 @@ def main():
         do_personality=run_personality,
         do_topics=run_topics,
         multilingual=USE_MULTILINGUAL,
+        sentiment_backend=sentiment_backend_key,
+        hf_token_available=hf_token_available,
     )
 
     st.header("📊 Chat Analysis")
@@ -346,6 +395,16 @@ def main():
     with tabs[2]:
         st.subheader("Sentiment Analysis")
         if run_sentiment and 'sentiment' in processed_df.columns:
+            if 'sentiment_backend' in processed_df.columns:
+                backend_counts = processed_df['sentiment_backend'].value_counts()
+                st.caption(
+                    "Backend used: "
+                    + ", ".join(
+                        f"{backend} ({count:,})"
+                        for backend, count in backend_counts.items()
+                    )
+                )
+
             fig = plot_sentiment(processed_df)
             if fig:
                 st.pyplot(fig)
@@ -374,9 +433,7 @@ def main():
 
             if chat_language != "English":
                 st.info(
-                    "ℹ️ Sentiment was analysed using the multilingual pipeline. "
-                    "For best results ensure `transformers` is installed "
-                    "(`pip install transformers torch`)."
+                    "Sentiment was analysed using the selected multilingual pipeline."
                 )
         else:
             st.info("Enable **Sentiment Analysis** in the sidebar to see results.")
