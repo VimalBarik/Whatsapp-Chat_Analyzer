@@ -51,11 +51,13 @@ def configure_hf_token_from_secrets():
     """Expose Streamlit's HF token secret to the analyzer module."""
     try:
         hf_token = st.secrets.get("HF_TOKEN")
+        hf_model = st.secrets.get("HF_SENTIMENT_MODEL")
     except Exception:
         hf_token = None
+        hf_model = None
 
     if hf_token:
-        configure_hf_token(hf_token)
+        configure_hf_token(hf_token, model=hf_model)
 
 
 # ── Page config ───────────────────────────────────────────────────────────────
